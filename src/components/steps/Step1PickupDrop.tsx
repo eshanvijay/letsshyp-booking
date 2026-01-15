@@ -1,22 +1,63 @@
 import { useState, useCallback, useEffect } from 'react';
-import { GoogleMap, Marker } from '@react-google-maps/api';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useBooking } from '../../context/BookingContext';
 import { SERVICEABLE_AREAS } from '../../types';
 import AddressInput from '../AddressInput';
 
-const mapContainerStyle = {
-  width: '100%',
-  height: '300px',
-};
+// Fix for default marker icons in Leaflet with React
+const pickupIcon = new L.Icon({
+  iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="50" viewBox="0 0 40 50">
+      <path d="M20 0 C9 0 0 9 0 20 C0 35 20 50 20 50 C20 50 40 35 40 20 C40 9 31 0 20 0 Z" fill="#4CAF50"/>
+      <circle cx="20" cy="18" r="10" fill="white"/>
+      <text x="20" y="23" text-anchor="middle" fill="#4CAF50" font-size="14" font-weight="bold">P</text>
+    </svg>
+  `),
+  iconSize: [40, 50],
+  iconAnchor: [20, 50],
+  popupAnchor: [0, -50],
+});
 
-const defaultCenter = {
-  lat: 19.0330,
-  lng: 73.0297,
-};
+const dropIcon = new L.Icon({
+  iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="50" viewBox="0 0 40 50">
+      <path d="M20 0 C9 0 0 9 0 20 C0 35 20 50 20 50 C20 50 40 35 40 20 C40 9 31 0 20 0 Z" fill="#E53935"/>
+      <circle cx="20" cy="18" r="10" fill="white"/>
+      <text x="20" y="23" text-anchor="middle" fill="#E53935" font-size="14" font-weight="bold">D</text>
+    </svg>
+  `),
+  iconSize: [40, 50],
+  iconAnchor: [20, 50],
+  popupAnchor: [0, -50],
+});
+
+// Component to update map view
+function MapUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, zoom);
+  }, [center, zoom, map]);
+  return null;
+}
+
+// Component to fit bounds when both markers are present
+function FitBounds({ pickup, drop }: { pickup: [number, number] | null; drop: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (pickup && drop) {
+      const bounds = L.latLngBounds([pickup, drop]);
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [pickup, drop, map]);
+  return null;
+}
 
 export default function Step1PickupDrop() {
   const { state, dispatch } = useBooking();
-  const [mapCenter, setMapCenter] = useState(defaultCenter);
+  const [mapCenter, setMapCenter] = useState<[number, number]>([19.0330, 73.0297]);
+  const [mapZoom, setMapZoom] = useState(13);
   const [deliveryNotes, setDeliveryNotes] = useState(state.deliveryNotes);
   const [errors, setErrors] = useState({
     pickup: '',
@@ -42,7 +83,8 @@ export default function Step1PickupDrop() {
         isServiceable,
       },
     });
-    setMapCenter({ lat, lng });
+    setMapCenter([lat, lng]);
+    setMapZoom(14);
     setErrors(prev => ({ ...prev, pickup: '' }));
   }, [dispatch]);
 
@@ -59,7 +101,8 @@ export default function Step1PickupDrop() {
       },
     });
     if (!state.pickup.isValid) {
-      setMapCenter({ lat, lng });
+      setMapCenter([lat, lng]);
+      setMapZoom(14);
     }
     setErrors(prev => ({ ...prev, drop: '' }));
   }, [dispatch, state.pickup.isValid]);
@@ -93,14 +136,20 @@ export default function Step1PickupDrop() {
   const isNextDisabled = !state.pickup.address || !state.drop.address || 
     !state.pickup.isServiceable || !state.drop.isServiceable;
 
-  useEffect(() => {
-    if (state.pickup.lat && state.drop.lat) {
-      setMapCenter({
-        lat: (state.pickup.lat + state.drop.lat) / 2,
-        lng: (state.pickup.lng + state.drop.lng) / 2,
-      });
-    }
-  }, [state.pickup.lat, state.pickup.lng, state.drop.lat, state.drop.lng]);
+  // Calculate distance
+  const distance = state.pickup.isValid && state.drop.isValid
+    ? Math.round(
+        Math.sqrt(
+          Math.pow(state.pickup.lat - state.drop.lat, 2) +
+          Math.pow(state.pickup.lng - state.drop.lng, 2)
+        ) * 111
+      )
+    : 0;
+
+  // Route line coordinates
+  const routePositions: [number, number][] = state.pickup.isValid && state.drop.isValid
+    ? [[state.pickup.lat, state.pickup.lng], [state.drop.lat, state.drop.lng]]
+    : [];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -203,65 +252,60 @@ export default function Step1PickupDrop() {
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-shyp-dark">Route Preview</h3>
           {state.pickup.isValid && state.drop.isValid && (
-            <span className="text-sm text-shyp-gray">
-              ~{Math.round(
-                Math.sqrt(
-                  Math.pow(state.pickup.lat - state.drop.lat, 2) +
-                  Math.pow(state.pickup.lng - state.drop.lng, 2)
-                ) * 111
-              )} km
+            <span className="text-sm text-shyp-red font-medium bg-shyp-lightRed px-3 py-1 rounded-full">
+              ~{distance} km
             </span>
           )}
         </div>
         
-        <div className="map-container rounded-xl overflow-hidden">
-          <GoogleMap
-            mapContainerStyle={mapContainerStyle}
+        <div className="rounded-xl overflow-hidden shadow-lg" style={{ height: '300px' }}>
+          <MapContainer
             center={mapCenter}
-            zoom={state.pickup.isValid && state.drop.isValid ? 12 : 13}
-            options={{
-              disableDefaultUI: true,
-              zoomControl: true,
-              styles: [
-                {
-                  featureType: 'poi',
-                  elementType: 'labels',
-                  stylers: [{ visibility: 'off' }],
-                },
-              ],
-            }}
+            zoom={mapZoom}
+            style={{ height: '100%', width: '100%' }}
+            zoomControl={true}
           >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <MapUpdater center={mapCenter} zoom={mapZoom} />
+            
+            {state.pickup.isValid && state.drop.isValid && (
+              <FitBounds 
+                pickup={[state.pickup.lat, state.pickup.lng]} 
+                drop={[state.drop.lat, state.drop.lng]} 
+              />
+            )}
+            
             {state.pickup.isValid && (
-              <Marker
-                position={{ lat: state.pickup.lat, lng: state.pickup.lng }}
-                icon={{
-                  url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
-                      <circle cx="20" cy="20" r="18" fill="#4CAF50" stroke="white" stroke-width="3"/>
-                      <text x="20" y="26" text-anchor="middle" fill="white" font-size="16" font-weight="bold">P</text>
-                    </svg>
-                  `),
-                  scaledSize: new google.maps.Size(40, 40),
-                }}
-                title="Pickup Location"
-              />
+              <Marker position={[state.pickup.lat, state.pickup.lng]} icon={pickupIcon}>
+                <Popup>
+                  <div className="font-medium">📍 Pickup Location</div>
+                  <div className="text-sm text-gray-600">{state.pickup.address}</div>
+                </Popup>
+              </Marker>
             )}
+            
             {state.drop.isValid && (
-              <Marker
-                position={{ lat: state.drop.lat, lng: state.drop.lng }}
-                icon={{
-                  url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
-                      <circle cx="20" cy="20" r="18" fill="#E53935" stroke="white" stroke-width="3"/>
-                      <text x="20" y="26" text-anchor="middle" fill="white" font-size="16" font-weight="bold">D</text>
-                    </svg>
-                  `),
-                  scaledSize: new google.maps.Size(40, 40),
-                }}
-                title="Drop Location"
+              <Marker position={[state.drop.lat, state.drop.lng]} icon={dropIcon}>
+                <Popup>
+                  <div className="font-medium">🎯 Drop Location</div>
+                  <div className="text-sm text-gray-600">{state.drop.address}</div>
+                </Popup>
+              </Marker>
+            )}
+            
+            {routePositions.length === 2 && (
+              <Polyline
+                positions={routePositions}
+                color="#E53935"
+                weight={4}
+                opacity={0.8}
+                dashArray="10, 10"
               />
             )}
-          </GoogleMap>
+          </MapContainer>
         </div>
 
         {/* Location Summary */}
@@ -273,6 +317,11 @@ export default function Step1PickupDrop() {
               <p className="text-sm text-shyp-dark truncate">
                 {state.pickup.address || 'Select pickup location'}
               </p>
+              {state.pickup.isValid && (
+                <p className="text-xs text-shyp-gray mt-1">
+                  📍 {state.pickup.lat.toFixed(4)}, {state.pickup.lng.toFixed(4)}
+                </p>
+              )}
             </div>
           </div>
           
@@ -287,6 +336,11 @@ export default function Step1PickupDrop() {
               <p className="text-sm text-shyp-dark truncate">
                 {state.drop.address || 'Select drop location'}
               </p>
+              {state.drop.isValid && (
+                <p className="text-xs text-shyp-gray mt-1">
+                  📍 {state.drop.lat.toFixed(4)}, {state.drop.lng.toFixed(4)}
+                </p>
+              )}
             </div>
           </div>
         </div>

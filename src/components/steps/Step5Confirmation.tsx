@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useBooking } from '../../context/BookingContext';
+import LiveTracking from '../LiveTracking';
 
 interface Confetti {
   id: number;
@@ -12,6 +13,7 @@ export default function Step5Confirmation() {
   const { state, dispatch } = useBooking();
   const [confetti, setConfetti] = useState<Confetti[]>([]);
   const [copied, setCopied] = useState(false);
+  const [showTracking, setShowTracking] = useState(false);
 
   useEffect(() => {
     const colors = ['#E53935', '#4CAF50', '#FF9800', '#2196F3', '#9C27B0'];
@@ -40,9 +42,90 @@ export default function Step5Confirmation() {
   };
 
   const handleTrackOrder = () => {
-    alert(`Tracking page for ${state.bookingId} - Coming soon!`);
+    setShowTracking(true);
   };
 
+  // If tracking mode is enabled, show the live tracking view
+  if (showTracking) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={() => setShowTracking(false)}
+            className="flex items-center gap-2 text-shyp-gray hover:text-shyp-red transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to Details
+          </button>
+          <div className="text-right">
+            <p className="text-xs text-shyp-gray">Booking ID</p>
+            <p className="font-bold text-shyp-red">{state.bookingId}</p>
+          </div>
+        </div>
+
+        {/* Live Tracking Map */}
+        <LiveTracking
+          pickupLat={state.pickup.lat}
+          pickupLng={state.pickup.lng}
+          dropLat={state.drop.lat}
+          dropLng={state.drop.lng}
+          pickupAddress={state.pickup.address}
+          dropAddress={state.drop.address}
+        />
+
+        {/* Order Summary Below Map */}
+        <div className="mt-6 bg-white rounded-2xl shadow-xl p-6">
+          <h3 className="font-semibold text-shyp-dark mb-4">Delivery Details</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 bg-green-50 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-3 h-3 bg-shyp-green rounded-full"></span>
+                <span className="text-xs text-shyp-gray font-medium">PICKUP</span>
+              </div>
+              <p className="text-sm text-shyp-dark font-medium">{state.pickup.address}</p>
+              <p className="text-xs text-shyp-gray mt-1">{state.userDetails.senderName} • +91 {state.userDetails.senderPhone}</p>
+            </div>
+            <div className="p-4 bg-red-50 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-3 h-3 bg-shyp-red rounded-full"></span>
+                <span className="text-xs text-shyp-gray font-medium">DROP</span>
+              </div>
+              <p className="text-sm text-shyp-dark font-medium">{state.drop.address}</p>
+              <p className="text-xs text-shyp-gray mt-1">{state.userDetails.receiverName} • +91 {state.userDetails.receiverPhone}</p>
+            </div>
+          </div>
+          
+          <div className="mt-4 flex items-center justify-between pt-4 border-t">
+            <div>
+              <p className="text-xs text-shyp-gray">Total Amount</p>
+              <p className="text-xl font-bold text-shyp-red">₹{state.pricing.total}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-shyp-gray">Delivery Type</p>
+              <p className="font-medium text-shyp-dark">
+                {state.deliveryType.type === 'express' ? '🚀 Express' : '📦 Standard'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* New Booking Button */}
+        <div className="mt-6 text-center">
+          <button
+            onClick={handleNewBooking}
+            className="px-8 py-3 border-2 border-shyp-red text-shyp-red rounded-xl font-semibold hover:bg-shyp-lightRed transition-all"
+          >
+            Book Another Delivery
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Default confirmation view
   return (
     <div className="relative">
       {confetti.map((c) => (
@@ -172,7 +255,7 @@ export default function Step5Confirmation() {
               </li>
               <li className="flex items-start gap-2">
                 <span className="w-5 h-5 bg-blue-200 rounded-full flex items-center justify-center text-xs flex-shrink-0">3</span>
-                <span>Track your delivery in real-time</span>
+                <span>Track your delivery in real-time on the map</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="w-5 h-5 bg-blue-200 rounded-full flex items-center justify-center text-xs flex-shrink-0">4</span>
@@ -190,7 +273,7 @@ export default function Step5Confirmation() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              Track Order
+              Track Order Live
             </button>
             <button
               onClick={handleNewBooking}

@@ -1,8 +1,4 @@
-import { useRef, useState } from 'react';
-import usePlacesAutocomplete, {
-  getGeocode,
-  getLatLng,
-} from 'use-places-autocomplete';
+import { useRef, useState, useEffect, useCallback } from 'react';
 
 interface AddressInputProps {
   placeholder: string;
@@ -11,47 +7,104 @@ interface AddressInputProps {
   error?: string;
 }
 
+interface Suggestion {
+  place_id: string;
+  description: string;
+  structured_formatting: {
+    main_text: string;
+    secondary_text: string;
+  };
+}
+
 export default function AddressInput({
   placeholder,
   value,
   onSelect,
   error,
 }: AddressInputProps) {
+  const [inputValue, setInputValue] = useState(value);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isFocused, setIsFocused] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const autocompleteService = useRef<google.maps.places.AutocompleteService | null>(null);
+  const placesService = useRef<google.maps.places.PlacesService | null>(null);
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
-  const {
-    ready,
-    suggestions: { status, data },
-    setValue,
-    clearSuggestions,
-  } = usePlacesAutocomplete({
-    requestOptions: {
-      componentRestrictions: { country: 'in' },
-    },
-    debounce: 300,
-    defaultValue: value,
-  });
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (window.google && window.google.maps && window.google.maps.places) {
+      autocompleteService.current = new google.maps.places.AutocompleteService();
+      // Create a dummy div for PlacesService
+      const dummyDiv = document.createElement('div');
+      placesService.current = new google.maps.places.PlacesService(dummyDiv);
+    }
+  }, []);
+
+  const searchPlaces = useCallback((input: string) => {
+    if (!autocompleteService.current || input.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+
+    setIsLoading(true);
+    autocompleteService.current.getPlacePredictions(
+      {
+        input,
+        componentRestrictions: { country: 'in' },
+      },
+      (predictions, status) => {
+        setIsLoading(false);
+        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+          setSuggestions(predictions as Suggestion[]);
+        } else {
+          setSuggestions([]);
+        }
+      }
+    );
+  }, []);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setValue(e.target.value);
+    const newValue = e.target.value;
+    setInputValue(newValue);
+
+    // Debounce the search
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    debounceTimer.current = setTimeout(() => {
+      searchPlaces(newValue);
+    }, 300);
   };
 
-  const handleSelect = async (description: string) => {
-    setValue(description, false);
-    clearSuggestions();
+  const handleSelect = (suggestion: Suggestion) => {
+    if (!placesService.current) return;
 
-    try {
-      const results = await getGeocode({ address: description });
-      const { lat, lng } = await getLatLng(results[0]);
-      onSelect(description, lat, lng);
-    } catch (error) {
-      console.error('Error: ', error);
-    }
+    setInputValue(suggestion.description);
+    setSuggestions([]);
+
+    // Get place details to retrieve lat/lng
+    placesService.current.getDetails(
+      {
+        placeId: suggestion.place_id,
+        fields: ['geometry'],
+      },
+      (place, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && place?.geometry?.location) {
+          const lat = place.geometry.location.lat();
+          const lng = place.geometry.location.lng();
+          onSelect(suggestion.description, lat, lng);
+        }
+      }
+    );
   };
 
   const handleClear = () => {
-    setValue('');
+    setInputValue('');
+    setSuggestions([]);
     onSelect('', 0, 0);
     inputRef.current?.focus();
   };
@@ -92,15 +145,19 @@ export default function AddressInput({
         </div>
         <input
           ref={inputRef}
-          value={value || ''}
+          value={inputValue}
           onChange={handleInput}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setTimeout(() => setIsFocused(false), 200)}
-          disabled={!ready}
           placeholder={placeholder}
           className="w-full px-3 py-4 bg-transparent outline-none text-shyp-dark placeholder-gray-400"
         />
-        {value && (
+        {isLoading && (
+          <div className="pr-2">
+            <div className="w-5 h-5 border-2 border-shyp-red border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        )}
+        {inputValue && !isLoading && (
           <button
             type="button"
             onClick={handleClear}
@@ -134,33 +191,23 @@ export default function AddressInput({
       )}
 
       {/* Suggestions Dropdown */}
-      {status === 'OK' && isFocused && (
+      {suggestions.length > 0 && isFocused && (
         <ul className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden animate-fade-in">
-          {data.map((suggestion) => {
-            const {
-              place_id,
-              structured_formatting: { main_text, secondary_text },
-            } = suggestion;
-
-            return (
-              <li
-                key={place_id}
-                onClick={() => handleSelect(suggestion.description)}
-                className="px-4 py-3 hover:bg-shyp-lightRed cursor-pointer transition-colors border-b border-gray-100 last:border-b-0"
-              >
-                <p className="font-medium text-shyp-dark">{main_text}</p>
-                <p className="text-sm text-shyp-gray">{secondary_text}</p>
-              </li>
-            );
-          })}
+          {suggestions.map((suggestion) => (
+            <li
+              key={suggestion.place_id}
+              onClick={() => handleSelect(suggestion)}
+              className="px-4 py-3 hover:bg-shyp-lightRed cursor-pointer transition-colors border-b border-gray-100 last:border-b-0"
+            >
+              <p className="font-medium text-shyp-dark">
+                {suggestion.structured_formatting.main_text}
+              </p>
+              <p className="text-sm text-shyp-gray">
+                {suggestion.structured_formatting.secondary_text}
+              </p>
+            </li>
+          ))}
         </ul>
-      )}
-
-      {/* Loading State */}
-      {!ready && (
-        <div className="absolute inset-0 bg-white/80 rounded-xl flex items-center justify-center">
-          <div className="w-5 h-5 border-2 border-shyp-red border-t-transparent rounded-full animate-spin"></div>
-        </div>
       )}
     </div>
   );
